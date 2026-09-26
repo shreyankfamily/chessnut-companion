@@ -16,7 +16,7 @@ The launcher exposes online play and board settings only. Puzzle, engine, analys
 
 ## Install on the Companion through Google Play
 
-This app is delivered through a Google Play **internal testing** release, not by downloading an APK from GitHub. Add the Google account used on the Companion to the release's tester list, open the Play testing link on the device, opt in, and select **Install**. Google Play then supplies the correct signed build and updates.
+Google Play **internal testing** is the intended delivery method for Companions that only allow Play Store installations. The signed bundle is prepared, but a Play release and installation link are not available until the owner's Play Console registration and upload are completed. Once the internal release is available, add the Google account used on the Companion to the release's tester list, open the Play testing link on the device, opt in, and select **Install**. Google Play then supplies the signed build and updates.
 
 An internal test can have up to 100 testers and is normally available within minutes. It is the appropriate track for installing this personal app on the Companion. Personal Play developer accounts created after November 13, 2023 need 12 opted-in testers for 14 continuous days before they can publish to the public Production track; that requirement does not prevent internal testing. See Google's [testing requirements](https://support.google.com/googleplay/android-developer/answer/14151465).
 
