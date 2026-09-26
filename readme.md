@@ -1,155 +1,94 @@
-# Chessnut Flutter
+# Companion Online
 
-A multi-platform Flutter client for Chessnut electronic chessboards. This
-repository contains the application source and native projects required to
-build the app for Android, iOS, macOS, Windows, and Linux.
+An independent Android fork of [ChessnutNext](https://github.com/chessnutech/ChessnutNext), focused on playing online with a Chessnut board and the Chessnut Companion. Its landscape interface is designed for the Companion's 1280 × 480 display.
 
-> Firebase configuration, OAuth credentials, and signing material are not
-> included in the repository. Use credentials and identifiers owned by your
-> organization when building the project.
+The installed app is **Companion Online**, with Android application ID `io.github.shreyankfamily.companiononline`. It installs alongside the stock Chessnut app. This is a personal fork, not an official Chessnut release or a Google Play listing.
 
-## Supported Platforms
+## What is included
 
-- Android
-- iOS
-- macOS
-- Windows
-- Linux
+- Lichess matchmaking with **Random / White / Black** selection, friend challenges, and incoming challenges through the official Board API.
+- Chess.com play and friend challenges through the existing embedded website integration.
+- Automatic screen orientation to your playing color, enlarged ratings, and large clocks on the right during online games.
+- A game-start sound, with **Game and match sounds** available in settings.
+- Chessnut Bluetooth board connection and the existing board/clock integration.
 
-## Prerequisites
+The launcher exposes online play and board settings only. Puzzle, engine, analysis, training, store, and Chessnut-account routes are not part of this app. Legacy source remains in the repository for shared components and upstream maintenance; this is not a complete removal of every unused source file.
 
-- Git LFS for the Stockfish neural network files and embedded YOLO model
-- Flutter with Dart `>=3.3.0 <4.0.0`
-- Firebase CLI and FlutterFire CLI
-- Android: JDK 17, Android SDK 37, and NDK `28.2.13676358`
-- iOS: macOS, Xcode, CocoaPods, and an iOS 15.0 or newer deployment target
-- macOS: Xcode, CocoaPods, and a macOS 12.0 or newer deployment target
-- Windows or Linux native toolchains when building for those platforms
+## Install on the Companion
 
-## Clone and Download Model Files
+1. Download the signed ARM64 APK from this private repository's [Releases](https://github.com/shreyankfamily/chessnut-companion/releases), or build one using the instructions below.
+2. Transfer the APK to the Companion, open it in the device's file manager, and allow that installer to install apps when Android prompts. Install **Companion Online**.
+3. Close the stock Chessnut app before connecting your board. If it keeps the Bluetooth connection in the background, stop it from Android's app settings so Companion Online can connect.
+4. Open Companion Online, choose **Connect board**, and grant the requested Nearby devices/Bluetooth permission. Turn on your board and select it.
+5. Choose Lichess or Chess.com and connect your account as described below. Keep the Companion connected to the internet and set its media volume high enough to hear game-start sounds.
 
-This repository uses Git LFS for the Stockfish neural network files (`*.nnue`)
-and the embedded YOLO model (`third_party/yolov5vision/src/yolov8_bin.h`).
-The full model contents are required to build the native engines and vision plugin.
-
-### First-time clone
-
-Install [Git LFS](https://git-lfs.com/) before cloning. The `git lfs install`
-command below enables Git LFS for your user account; it does not install the
-Git LFS executable.
+For development, Android's USB debugging can also install a successfully built APK:
 
 ```bash
-git lfs install
-git clone https://github.com/chessnutech/ChessnutNext.git
-cd ChessnutNext
+adb install -r build/app/outputs/flutter-apk/app-arm64-v8a-debug.apk
+```
+
+The current fork uses Bluetooth for board discovery. Physical board orientation is a separate setting from the screen: the screen follows your online color, while **Physical board auto orientation** controls how the app interprets the connected board.
+
+## Lichess account and games
+
+Choose **Lichess**, then **Authorize Lichess**. In the account dialog, **Create token on Lichess** opens the official token page in your browser. Sign into your normal human Lichess account and create a token with these four permissions:
+
+| Permission | Scope |
+| --- | --- |
+| Play games with the Board API | `board:play` |
+| Read incoming challenges | `challenge:read` |
+| Create, accept, and decline challenges | `challenge:write` |
+| Read followed players | `follow:read` |
+
+Paste the token into **Personal access token** in the app and choose **Connect Lichess**. The app validates it directly with Lichess and stores it using secure storage on the device; it does not send the token to the Chessnut backend. Never paste a real token into Git, source files, logs, issue reports, or chat. Manage or revoke it from [Lichess personal access tokens](https://lichess.org/account/oauth/token).
+
+Select the time control, rated/casual preference, and **Random**, **White**, or **Black** before searching. For a friend game, use the friend challenge controls to select a followed player or enter a username, choose the game settings, and send the challenge. Your friend must accept it. Incoming challenges appear in the same setup flow. The game screen uses the color actually assigned by Lichess, including when resuming a game.
+
+Lichess requires electronic boards to use its official Board API. Random matchmaking through this API supports rapid, classical, and correspondence games. Blitz is permitted for direct challenges, AI games, and bulk pairings; this fork exposes friend challenges rather than AI play. Bullet and ultrabullet are not supported. The app does not use Vision to bypass these limits. See [Lichess's electronic-board policy](https://lichess.org/page/eboards) and [Board API documentation](https://lichess.org/api#tag/Board).
+
+## Chess.com account and games
+
+Choose **Chess.com** and sign in on the embedded Chess.com website. Use the site's matchmaking controls, or the app's **Challenge a friend** shortcut to open the site's **Play a Friend** picker. You choose the opponent and submit the challenge on Chess.com; opening the picker does not send one.
+
+During a recognized live game on a wide display, the app shows a native board oriented to your color, larger ratings, and the clocks read from Chess.com's page. You can move on the physical board or the displayed board. **Game controls** returns to the website for resigning, draw offers, chat, and other site controls; **Board & clocks** restores the large display.
+
+This retains ChessnutNext's WebView integration and its remotely loaded helper at `https://api.chessnutech.com/static/js/chess-helper.js`. It depends on that service and on Chess.com's page structure. If live-game data or clocks cannot be read, the original website remains available instead of displaying invented clock values. If the friend shortcut cannot find the picker, open **New Game → Play a Friend** on the website.
+
+Chess.com's public API is read-only and cannot send moves. This fork does not replace the existing website integration with a new public live-play API. See [Chess.com's API guidance](https://support.chess.com/en/articles/9650547-what-is-the-pubapi-and-how-do-i-use-it). Changes to Chess.com or the remote helper may require an app update; verify play with your own account and hardware before relying on it for a rated game.
+
+## Android build
+
+The configured build toolchain is:
+
+| Tool | Version |
+| --- | --- |
+| Flutter | 3.47.5 |
+| Dart | 3.13.4, bundled with Flutter |
+| Java | JDK 17 |
+| Android compile / target SDK | 36 |
+| Android minimum SDK | 28 |
+| Android NDK | 28.2.13676358 |
+| APK architecture | ARM64 (`android-arm64`) |
+
+Install Flutter, JDK 17, and the Android SDK/NDK, then configure their normal local paths. `flutter doctor -v` helps identify missing Android tooling. Android SDK license acceptance must be completed by the developer. Android Studio is convenient for installing the SDK components; the commands below run from the repository root.
+
+```bash
+GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/shreyankfamily/chessnut-companion.git
+cd chessnut-companion
 flutter pub get
+flutter build apk --debug --target-platform android-arm64 --split-per-abi
 ```
 
-With Git LFS enabled, a normal `git clone` automatically downloads the model
-files. A separate `git lfs pull` is normally unnecessary unless automatic LFS
-downloads were disabled or the download failed.
+The debug build writes `build/app/outputs/flutter-apk/app-arm64-v8a-debug.apk`. Debug signing uses the local Android debug key and does not require a release keystore. `--split-per-abi` keeps other architectures from being packaged with ARM64 native dependencies.
 
-### Already cloned without Git LFS
+`android/gradle.properties` sets `companionOnline=true`, disabling the native Stockfish, LC0, and camera/Vision builds for this online app. Their large Git LFS engine/model assets are therefore not needed for this configuration. Keep that property enabled for these instructions. The upstream native sources remain available, but changing the property alone does not restore the original multi-mode product.
 
-Without Git LFS enabled, a clone may contain small text pointer files at the
-model paths instead of the actual model data. These placeholders cannot be
-used to build the project.
+Firebase initialization and its Android build integration have been removed from this fork. The online launcher does not require Firebase files, a Chessnut account, or the upstream Google/Apple authentication setup. `flutter_secure_storage` is pinned to `10.0.0` for compatibility with the selected stable Android SDK. Keep the checked-in dependency lockfile when reproducing a build.
 
-Install Git LFS, then run the following from the existing project root to
-download the models and replace the pointers. You do not need to clone again.
+## Release signing and updates
 
-```bash
-git lfs install
-git lfs pull
-flutter pub get
-```
-
-## Local Configuration
-
-### 1. Firebase
-
-The application imports `lib/firebase_options.dart` unconditionally. Generate
-a Firebase configuration before attempting to run or build the project:
-
-```bash
-dart pub global activate flutterfire_cli
-firebase login
-flutterfire configure
-```
-
-Select your Firebase project and every platform that you intend to build. The
-configuration must generate `lib/firebase_options.dart` and the applicable
-platform files:
-
-- Project root: `firebase.json`
-- Android: `android/app/google-services.json`
-- iOS: `ios/Runner/GoogleService-Info.plist`
-- macOS: `macos/Runner/GoogleService-Info.plist`
-
-These generated files are local configuration and must not be committed.
-
-### 2. Authentication values
-
-Application service URLs are defined internally and do not need to be supplied
-at compile time. Create the local Dart define file from the provided template:
-
-```bash
-cp config/dart_defines.example.json config/dart_defines.json
-```
-
-Replace every placeholder in `config/dart_defines.json`:
-
-- `CHESSNUT_TURNSTILE_SITE_KEY`: Cloudflare Turnstile site key
-- `GOOGLE_SERVER_CLIENT_ID`: Google OAuth client ID used for server-side token
-  verification
-- `APPLE_SERVICE_ID`: Sign in with Apple service ID
-- `APPLE_REDIRECT_URI`: Apple authentication callback URL
-- `CHESSNUT_ANDROID_PACKAGE_NAME`: Android application ID
-
-Pass the file to every Flutter run or build command:
-
-```bash
---dart-define-from-file=config/dart_defines.json
-```
-
-### 3. Google Sign-In on Apple platforms
-
-Create the local configuration files from their templates:
-
-```bash
-cp ios/Flutter/Secrets.xcconfig.example ios/Flutter/Secrets.xcconfig
-cp macos/Flutter/Secrets.xcconfig.example macos/Flutter/Secrets.xcconfig
-```
-
-Replace the placeholders in both files:
-
-- `GOOGLE_CLIENT_ID`: OAuth client ID for the corresponding Apple platform
-- `GOOGLE_REVERSED_CLIENT_ID`: reversed OAuth client ID
-- `GOOGLE_SERVER_CLIENT_ID`: Google OAuth client ID used for server-side token
-  verification
-
-The values must match the corresponding Firebase and Google Cloud projects.
-Keep both generated `Secrets.xcconfig` files out of Git.
-
-### 4. Application identifiers and Apple signing
-
-Before publishing, replace the existing identifiers with identifiers owned by
-your organization:
-
-- Android: update `applicationId` in `android/app/build.gradle.kts`
-- iOS: update the Runner bundle identifier in Xcode
-- macOS: update the Runner bundle identifier in Xcode
-
-Register the same identifiers in Firebase and in the applicable Google and
-Apple developer consoles. The checked-in Apple projects do not define a
-Developer Team, so select your own team in Xcode for signed builds.
-
-### 5. Android release signing
-
-Debug builds use the standard Android debug key. Release APK and App Bundle
-builds require a local release keystore.
-
-Generate a keystore, then copy the configuration template:
+Use your own local release key for a durable installation. Create it interactively so passwords are not included in shell history:
 
 ```bash
 keytool -genkeypair -v \
@@ -162,86 +101,40 @@ keytool -genkeypair -v \
 cp android/key.properties.example android/key.properties
 ```
 
-Set `storeFile`, `storePassword`, `keyAlias`, and `keyPassword` in
-`android/key.properties`. Never commit the keystore, passwords, or local
-properties file.
-
-## Run Locally
-
-Connect or select a target device, then run:
+Edit `android/key.properties` locally with `storeFile`, `storePassword`, `keyAlias`, and `keyPassword`. The example's `storeFile=release-keystore.jks` is relative to the `android` directory.
 
 ```bash
-flutter run --dart-define-from-file=config/dart_defines.json
+flutter build apk --release --target-platform android-arm64 --split-per-abi
 ```
 
-## Release Builds
+The release build writes `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk`. Release builds require the configured keystore; they do not fall back to debug signing.
 
-Run the commands below from the project root after completing all required
-configuration.
+Never commit `android/key.properties`, the `.jks`/`.keystore` file, passwords, tokens, or APK/build output. Back up the release key and its credentials securely: future updates must use the same application ID and signing key. Increase the build number in `pubspec.yaml` for later releases. Switching an existing debug installation to a release build uses a different signature and may require uninstalling the debug app, which removes its local settings and saved token.
 
-### Android
+## Focused validation
 
-Build an APK:
+After `flutter pub get`, run the tests covering this fork and its online/clock dependencies:
 
 ```bash
-flutter build apk --release \
-  --dart-define-from-file=config/dart_defines.json
+flutter test --no-pub \
+  test/companion_app_test.dart \
+  test/companion_online_setup_test.dart \
+  test/lichess_personal_token_test.dart \
+  test/companion_lichess_game_test.dart \
+  test/chess_com_companion_test.dart \
+  test/lichess_board_service_test.dart \
+  test/android_lichess_clock_test.dart \
+  test/android_lichess_landscape_test.dart \
+  test/chess_clock_android_landscape_test.dart \
+  test/chess_clock_switch_service_test.dart
 ```
 
-Build an Android App Bundle:
+The Chess.com Companion test file includes eight cases covering real-game recognition, invalid/non-game rejection, clock parsing, one alert per game, landscape orientation/layout, accepted/rejected touchscreen moves, and compact layouts at 640 × 240 and 853 × 320 logical pixels. These use controlled WebView/game fixtures; they do not establish successful live service or Bluetooth operation.
 
-```bash
-flutter build appbundle --release \
-  --dart-define-from-file=config/dart_defines.json
-```
+The inherited full upstream suite also includes unrelated modes and tests that depend on unavailable private Vision/macOS components. Do not interpret these focused commands as a claim that the entire upstream suite passes. Hardware acceptance still includes sign-in, both colors, friend challenges, board moves, clock synchronization, reconnects, and audible starts on the Companion.
 
-### iOS
+## Upstream and license
 
-> **Code signing is mandatory for iOS device and Release builds.** Configure a
-> valid Apple Developer Team, signing certificate, and provisioning profile
-> for the Runner target in Xcode before building.
+The original build instructions are preserved in [docs/UPSTREAM_README.md](docs/UPSTREAM_README.md) as historical upstream documentation. They describe the original multi-platform app and its Firebase/engine setup, not the Companion Online build above.
 
-```bash
-flutter build ios --release \
-  --dart-define-from-file=config/dart_defines.json
-```
-
-The `--no-codesign` option cannot produce a deployable iOS Release and does not
-remove signing requirements from signing-dependent Xcode build phases. Without
-an Apple signing setup, compilation can only be checked with an iOS Simulator
-Debug build:
-
-```bash
-flutter build ios --simulator --debug \
-  --dart-define-from-file=config/dart_defines.json
-```
-
-### macOS
-
-```bash
-flutter build macos --release \
-  --dart-define-from-file=config/dart_defines.json
-```
-
-### Windows
-
-```bash
-flutter build windows --release \
-  --dart-define-from-file=config/dart_defines.json
-```
-
-### Linux
-
-```bash
-flutter build linux --release \
-  --dart-define-from-file=config/dart_defines.json
-```
-
-iOS and macOS builds must run on macOS, Windows builds must run on Windows,
-and Linux builds must run on Linux.
-
-## License
-
-This project is licensed under the GNU General Public License v3.0. See
-[`LICENSE`](LICENSE) for the complete license text. Third-party components
-remain subject to their respective licenses.
+This fork retains ChessnutNext's [GNU General Public License v3.0](LICENSE). Keep the license and upstream attribution when distributing builds, and make the corresponding source available under the license. Third-party components retain their own licenses.

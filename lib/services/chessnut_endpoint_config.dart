@@ -10,7 +10,7 @@ class ChessnutEndpointConfig {
   static const defaultSupportUrl =
       'https://www.chessnutech.com/pages/contact-form';
   static const defaultWatchBaseUrl = 'https://app.chessnutech.com';
-  static const defaultAndroidPackageName = 'com.chessnut.newchessnut';
+  static const defaultAndroidPackageName = 'io.github.shreyankfamily.companiononline';
 
   static const _apiBaseUrl = String.fromEnvironment(
     'CHESSNUT_API_BASE_URL',

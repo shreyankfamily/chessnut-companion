@@ -165,6 +165,40 @@ void main() {
     ]);
   });
 
+  test('incoming challenges retain direction when the optional field is absent',
+      () async {
+    final service = LichessBoardService(
+      token: 'friend-token',
+      localLichessName: 'LocalPlayer',
+      httpClient: MockClient((_) async => http.Response(
+            jsonEncode({
+              'in': [
+                {
+                  'id': 'incoming-without-direction',
+                  'challenger': {'name': 'FriendPlayer'},
+                  'destUser': {'name': 'LocalPlayer'},
+                  'variant': {'key': 'standard'},
+                  'speed': 'rapid',
+                  'timeControl': {'limit': 600, 'increment': 5},
+                },
+              ],
+              'out': [
+                {'id': 'outgoing'},
+              ],
+            }),
+            200,
+          )),
+    );
+
+    final challenges = await service.getChallenges();
+
+    expect(challenges, hasLength(1));
+    expect(challenges!.single.direction, 'in');
+    expect(challenges.single.opponentName, 'FriendPlayer');
+    expect(challenges.where((challenge) => challenge.direction == 'in'),
+        hasLength(1));
+  });
+
   test('Lichess ongoing games uses the official account playing endpoint',
       () async {
     late http.Request captured;

@@ -3,46 +3,28 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('Stockfish Android build is release-build friendly', () {
-    final root = Directory.current;
-    final pluginDir = Directory('${root.path}/third_party/stockfish');
-    final gradleFile = File('${pluginDir.path}/android/build.gradle');
-    final cmakeFile = File('${pluginDir.path}/android/CMakeLists.txt');
-    final nnueDir = Directory('${pluginDir.path}/android/nnue');
-    final bigNet = File('${nnueDir.path}/nn-c288c895ea92.nnue');
-    final smallNet = File('${nnueDir.path}/nn-37f18f62d772.nnue');
-
-    expect(pluginDir.existsSync(), isTrue);
-    expect(gradleFile.existsSync(), isTrue);
-    expect(cmakeFile.existsSync(), isTrue);
-
-    final gradle = gradleFile.readAsStringSync();
-    final cmake = cmakeFile.readAsStringSync();
-
-    expect(gradle, contains('chessnutTargetAbis'));
-    expect(gradle, isNot(contains("'arm64-v8a', 'armeabi-v7a', 'x86_64'")));
-    expect(cmake, contains('NNUE_EMBEDDING_OFF'));
-    expect(cmake, isNot(contains('ensure_nnue')));
-    expect(
-      cmake,
-      isNot(contains(
-        r'file(DOWNLOAD https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue ${CMAKE_BINARY_DIR}/nn-c288c895ea92.nnue)',
-      )),
-    );
-    expect(bigNet.existsSync(), isTrue);
-    expect(smallNet.existsSync(), isTrue);
-    expect(bigNet.lengthSync(), greaterThan(100 * 1024 * 1024));
-    expect(smallNet.lengthSync(), greaterThan(3 * 1024 * 1024));
+  test('Online Android build excludes engine and vision native builds', () {
+    final root = Directory.current.path;
+    expect(File('$root/android/gradle.properties').readAsStringSync(),
+        contains('companionOnline=true'));
+    for (final plugin in ['stockfish', 'leela_chess_zero', 'yolov5vision']) {
+      final gradle = File('$root/third_party/$plugin/android/build.gradle')
+          .readAsStringSync();
+      expect(gradle,
+          contains("rootProject.findProperty('companionOnline') != 'true'"));
+    }
   });
 
-  test('Android packages Stockfish NNUE files once as application assets', () {
-    final gradleFile =
-        File('${Directory.current.path}/android/app/build.gradle.kts');
-    final gradle = gradleFile.readAsStringSync();
-
-    expect(gradle, contains('stockfishNnueDirectory'));
-    expect(gradle, contains('third_party/stockfish/android/nnue'));
-    expect(gradle, contains('assets.srcDir(stockfishNnueDirectory)'));
+  test('Online APK omits model assets and uses independent application ID', () {
+    final root = Directory.current.path;
+    final gradle =
+        File('$root/android/app/build.gradle.kts').readAsStringSync();
+    final pubspec = File('$root/pubspec.yaml').readAsStringSync();
+    expect(gradle, contains('io.github.shreyankfamily.companiononline'));
+    expect(gradle, isNot(contains('assets.srcDir(stockfishNnueDirectory)')));
+    expect(pubspec, isNot(contains('    - assets/maia_weights/')));
+    expect(pubspec, isNot(contains('    - assets/lc0_weights/')));
+    expect(pubspec, isNot(contains('firebase_core:')));
   });
 
   test('Android does not package duplicate Maia weights from LC0 plugin', () {
@@ -122,13 +104,14 @@ void main() {
     expect(content, isNot(contains('appSigning')));
   });
 
-  test('Android local backend test builds allow loopback HTTP', () {
+  test('Online Android app uses HTTPS and excludes account backups', () {
     final manifestFile = File(
         '${Directory.current.path}/android/app/src/main/AndroidManifest.xml');
     final manifest = manifestFile.readAsStringSync();
 
     expect(manifest, contains('android.permission.INTERNET'));
-    expect(manifest, contains('android:usesCleartextTraffic="true"'));
+    expect(manifest, contains('android:usesCleartextTraffic="false"'));
+    expect(manifest, contains('android:allowBackup="false"'));
   });
 
   test('AIDL active side only reflects physical USB reports', () {
@@ -509,34 +492,13 @@ void main() {
     expect(meson, contains("'src/utils/lc0_string.cc'"));
   });
 
-  test('Android home widgets are registered with Flutter bridge channel', () {
-    final manifestFile = File(
-        '${Directory.current.path}/android/app/src/main/AndroidManifest.xml');
-    final activityFile = File(
-      '${Directory.current.path}/android/app/src/main/kotlin/'
-      'com/chessnut/chessnutnext/MainActivity.kt',
-    );
-    final providerFile = File(
-      '${Directory.current.path}/android/app/src/main/kotlin/'
-      'com/chessnut/chessnutnext/ChessnutHomeWidgetProvider.kt',
-    );
-
-    final manifest = manifestFile.readAsStringSync();
-    final activity = activityFile.readAsStringSync();
-    final provider = providerFile.readAsStringSync();
-
-    expect(manifest,
-        contains('com.chessnut.chessnutnext.ChessnutHomeWidgetProvider'));
-    expect(manifest,
-        contains('com.chessnut.chessnutnext.ChessnutQuickPlayWidgetProvider'));
-    expect(
-        manifest, contains('com.chessnut.chessnut.ChessnutHomeWidgetReceiver'));
-    expect(manifest, contains('@xml/widget_board_console_info'));
-    expect(manifest, contains('@xml/widget_quick_play_info'));
-    expect(manifest, contains('@xml/widget_legacy_home_info'));
-    expect(activity, contains('chessnut/home_widget'));
-    expect(provider, contains('ACTION_TOGGLE_VISION'));
-    expect(provider, contains('ACTION_WIDGET_LAUNCH'));
+  test('Online app does not register shortcuts to removed modes', () {
+    final manifest = File(
+            '${Directory.current.path}/android/app/src/main/AndroidManifest.xml')
+        .readAsStringSync();
+    expect(manifest, isNot(contains('ChessnutHomeWidgetProvider')));
+    expect(manifest, isNot(contains('ChessnutQuickPlayWidgetProvider')));
+    expect(manifest, isNot(contains('ChessnutAccessibilityService')));
   });
 
   test('Android home widget layouts avoid unsupported RemoteViews tags', () {

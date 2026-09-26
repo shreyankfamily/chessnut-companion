@@ -28,6 +28,7 @@ linux/flutter/ephemeral/
 
 # Android / Gradle generated files
 **/.gradle/
+**/.kotlin/
 **/android/.gradle/
 **/local.properties
 

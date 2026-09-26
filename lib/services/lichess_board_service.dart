@@ -517,6 +517,75 @@ class LichessBoardService {
   String? get lastStreamErrorMessage => _lastStreamErrorMessage;
   int? get lastStatusCode => _lastStatusCode;
 
+  /// Checks permissions and identity directly with Lichess. Never include a
+  /// token-test response in an error: that endpoint echoes the secret as a key.
+  Future<String?> validatePersonalToken() async {
+    _clearLastError();
+    try {
+      final metadata = await _httpClient
+          .post(
+            _uri('api/token/test'),
+            headers: const {'Content-Type': 'text/plain'},
+            body: token,
+          )
+          .timeout(const Duration(seconds: 15));
+      _lastStatusCode = metadata.statusCode;
+      if (metadata.statusCode != 200) {
+        _setLastError('Lichess could not verify this token. Please try again.');
+        return null;
+      }
+      final decoded = jsonDecode(metadata.body);
+      final details = decoded is Map ? decoded[token] : null;
+      if (details is! Map) {
+        _lastStatusCode = 401;
+        _setLastError('This Lichess token is invalid or has been revoked.');
+        return null;
+      }
+      final scopes =
+          _string(details['scopes']).split(',').map((s) => s.trim()).toSet();
+      const requiredScopes = {
+        'board:play',
+        'challenge:read',
+        'challenge:write',
+        'follow:read',
+      };
+      final missing = requiredScopes.difference(scopes);
+      if (missing.isNotEmpty) {
+        _lastStatusCode = 403;
+        _setLastError(
+            'Create a token with these permissions: ${missing.join(', ')}.');
+        return null;
+      }
+      final account = await _httpClient
+          .get(
+            _uri('api/account'),
+            headers: authHeaders,
+          )
+          .timeout(const Duration(seconds: 15));
+      _lastStatusCode = account.statusCode;
+      if (account.statusCode != 200) {
+        _setLastError('Lichess could not verify the account for this token.');
+        return null;
+      }
+      final profile = jsonDecode(account.body);
+      final username =
+          profile is Map ? _string(profile['username']).trim() : '';
+      if (username.isEmpty) {
+        _setLastError('Lichess returned an unreadable account response.');
+        return null;
+      }
+      if (_string(profile['title']) == 'BOT') {
+        _setLastError('Use a normal Lichess account to play with your board.');
+        return null;
+      }
+      return username;
+    } catch (_) {
+      _setLastError(
+          'Lichess could not be reached. Check your connection and try again.');
+      return null;
+    }
+  }
+
   Future<List<LichessFriend>?> getFollowing() async {
     _clearLastError();
     final request = http.Request('GET', _uri('api/rel/following'))
@@ -597,7 +666,12 @@ class LichessBoardService {
         for (final item in incoming)
           if (item is Map)
             LichessChallenge.fromJson(
-              item.cast<String, dynamic>(),
+              {
+                ...item.cast<String, dynamic>(),
+                // ChallengeJson.direction is optional. The list's `in`
+                // container is authoritative for incoming challenges.
+                'direction': 'in',
+              },
               localLichessName: localLichessName,
             ),
       ].where((challenge) => challenge.id.isNotEmpty));

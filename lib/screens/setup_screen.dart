@@ -13,6 +13,7 @@ import '../services/board_settings_service.dart';
 import '../services/board_editor_led_feedback.dart';
 import '../services/chessnut_api_client.dart';
 import '../services/lichess_board_service.dart';
+import '../services/lichess_credentials_store.dart';
 import '../services/lc0_weight_library_service.dart';
 import '../services/physical_board_gateway.dart';
 import '../services/physical_board_orientation.dart';
@@ -23,6 +24,7 @@ import '../widgets/app_feedback.dart';
 import '../widgets/board_editor_en_passant.dart';
 import '../widgets/chess_board.dart';
 import '../widgets/lichess_authorization_dialog.dart';
+import '../widgets/lichess_token_dialog.dart';
 
 class _TimeControlOption {
   const _TimeControlOption({
@@ -1389,6 +1391,8 @@ class OnlineSetupScreen extends StatefulWidget {
     required this.boardSettings,
     required this.onBoardSettingsChanged,
     this.lichessAuthorizationPresenter = showLichessAuthorization,
+    this.directLichessSignIn = false,
+    this.lichessCredentialsStore = const SecureLichessCredentialsStore(),
     this.isChessnutClockDevice = false,
     super.key,
   });
@@ -1400,6 +1404,8 @@ class OnlineSetupScreen extends StatefulWidget {
   final BoardSettingsState boardSettings;
   final ValueChanged<BoardSettingsState> onBoardSettingsChanged;
   final LichessAuthorizationPresenter lichessAuthorizationPresenter;
+  final bool directLichessSignIn;
+  final LichessCredentialsStore lichessCredentialsStore;
   final bool isChessnutClockDevice;
 
   @override
@@ -1429,6 +1435,8 @@ class _OnlineSetupScreenState extends State<OnlineSetupScreen> {
   late final TextEditingController _lichessPlayerController;
   String lichessFriendQuery = '';
   String lichessFriendColor = 'random';
+  List<LichessOngoingGame> _ongoingGames = const [];
+  bool _checkingOngoingGames = false;
   bool lichessFriendChallengePending = false;
   String? lichessFriendChallengeId;
   String? lichessFriendChallengeMessage;
@@ -1449,7 +1457,7 @@ class _OnlineSetupScreenState extends State<OnlineSetupScreen> {
     super.initState();
     _lichessPlayerController = TextEditingController();
     final session = widget.apiClient.session;
-    if (session is ChessnutLoginSession) {
+    if (!widget.directLichessSignIn && session is ChessnutLoginSession) {
       final linkedName = session.lichessName.trim();
       if (session.bindLichess || linkedName.isNotEmpty) {
         lichessAuthorized = true;
@@ -1502,7 +1510,7 @@ class _OnlineSetupScreenState extends State<OnlineSetupScreen> {
                   _PlatformCard(
                     title: 'Lichess',
                     subtitle: 'Find opponents and sync board moves',
-                    badge: 'Native',
+                    badge: 'Online',
                     selected: !chesscom,
                     onTap: () => setState(() {
                       chesscom = false;
@@ -1511,8 +1519,8 @@ class _OnlineSetupScreenState extends State<OnlineSetupScreen> {
                   ),
                   _PlatformCard(
                     title: 'Chess.com',
-                    subtitle: 'Opens the existing WebView flow',
-                    badge: 'WebView',
+                    subtitle: 'Play online or challenge your friends',
+                    badge: 'Online',
                     selected: chesscom,
                     onTap: () => setState(() => chesscom = true),
                   ),
@@ -1529,7 +1537,7 @@ class _OnlineSetupScreenState extends State<OnlineSetupScreen> {
                     const SizedBox(height: 4),
                     Text(
                       chesscom
-                          ? 'Chess.com WebView mirror'
+                          ? 'Chess.com online game'
                           : 'Lichess online game',
                       style: const TextStyle(
                           fontWeight: FontWeight.w900, fontSize: 17),
@@ -1537,7 +1545,7 @@ class _OnlineSetupScreenState extends State<OnlineSetupScreen> {
                     const SizedBox(height: 4),
                     Text(
                       chesscom
-                          ? 'Use the existing WebView login and control layer. Game moves still mirror into the Chessnut board.'
+                          ? 'Sign in to Chess.com, find an opponent or challenge a friend. Your board follows the game automatically.'
                           : canSeekLichess
                               ? 'Lichess is authorized. Once a ${selectedTime.label} game is matched, Chessnut will sync moves to your board.'
                               : 'Authorize Lichess first so Chessnut can start online games and sync moves to your board.',
@@ -1561,6 +1569,16 @@ class _OnlineSetupScreenState extends State<OnlineSetupScreen> {
                   message: lichessMessage,
                   onAuthorize: _authorizeLichess,
                 ),
+              if (!chesscom && widget.directLichessSignIn && canSeekLichess)
+                TextButton.icon(
+                  onPressed: lichessSeeking || lichessFriendChallengePending
+                      ? null
+                      : _disconnectLichess,
+                  icon: const Icon(Icons.logout_rounded),
+                  label: const Text('Disconnect Lichess'),
+                ),
+              if (!chesscom && widget.directLichessSignIn && canSeekLichess)
+                _buildOngoingGamesPanel(),
             ],
           ),
           trailing: SectionColumn(
@@ -1602,7 +1620,13 @@ class _OnlineSetupScreenState extends State<OnlineSetupScreen> {
                     _LichessMatchModeCard(
                       selected: lichessMatchMode,
                       onChanged: (mode) {
-                        setState(() => lichessMatchMode = mode);
+                        setState(() {
+                          lichessMatchMode = mode;
+                          if (mode == _LichessMatchMode.random &&
+                              selectedTime.speed == 'Blitz') {
+                            selectedTime = _defaultTimeControl;
+                          }
+                        });
                         if (mode == _LichessMatchMode.friend &&
                             lichessAuthorized &&
                             !lichessFriendChecking &&
@@ -1618,6 +1642,16 @@ class _OnlineSetupScreenState extends State<OnlineSetupScreen> {
                       key: const ValueKey('online-match-settings-panel'),
                       spacing: 12,
                       children: [
+                        if (lichessMatchMode == _LichessMatchMode.random)
+                          GlassPanel(
+                            padding: const EdgeInsets.all(12),
+                            child: _LichessChallengeColorSelector(
+                              value: lichessFriendColor,
+                              enabled: !lichessSeeking,
+                              onChanged: (value) =>
+                                  setState(() => lichessFriendColor = value),
+                            ),
+                          ),
                         _TimeControlCard(
                           selected: selectedTime,
                           options: lichessMatchMode == _LichessMatchMode.friend
@@ -1629,7 +1663,7 @@ class _OnlineSetupScreenState extends State<OnlineSetupScreen> {
                             context: context,
                             initial: selectedTime,
                             subtitle:
-                                'Lichess seek uses minutes plus increment seconds.',
+                                'Choose minutes per player and seconds added after each move.',
                             onSave: (value) =>
                                 setState(() => selectedTime = value),
                           ),
@@ -1649,12 +1683,13 @@ class _OnlineSetupScreenState extends State<OnlineSetupScreen> {
                                       setState(() => rated = value),
                                   title: const Text('Rated'),
                                 ),
-                                SwitchListTile(
-                                  value: autoSubmit,
-                                  onChanged: (value) =>
-                                      setState(() => autoSubmit = value),
-                                  title: const Text('Auto submit'),
-                                ),
+                                if (!widget.directLichessSignIn)
+                                  SwitchListTile(
+                                    value: autoSubmit,
+                                    onChanged: (value) =>
+                                        setState(() => autoSubmit = value),
+                                    title: const Text('Auto submit'),
+                                  ),
                                 SwitchListTile(
                                   value: moveLeds,
                                   onChanged: (value) =>
@@ -1709,7 +1744,7 @@ class _OnlineSetupScreenState extends State<OnlineSetupScreen> {
                     if (!canSeekLichess)
                       Text(
                         lichessTokenExpired
-                            ? 'Authorization expired. Re-authorize before seeking.'
+                            ? 'Authorization expired. Re-authorize before finding a game.'
                             : 'Authorize Lichess before starting an online game.',
                         textAlign: TextAlign.center,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -1721,6 +1756,180 @@ class _OnlineSetupScreenState extends State<OnlineSetupScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  Future<bool> _restoreDirectLichessToken() async {
+    try {
+      final token = await widget.lichessCredentialsStore.readToken();
+      if (!mounted || token == null || token.isEmpty) return false;
+      return await _connectDirectLichessToken(token, save: false);
+    } catch (_) {
+      if (mounted) {
+        setState(() => lichessMessage =
+            'The saved Lichess account could not be opened. Connect again.');
+      }
+      return false;
+    }
+  }
+
+  Future<bool> _connectDirectLichessToken(String token,
+      {required bool save}) async {
+    setState(() {
+      lichessCheckingAuth = true;
+      lichessMessage = null;
+    });
+    final service = LichessBoardService(
+      token: token,
+      httpClient: widget.apiClient.httpClient,
+    );
+    final username = await service.validatePersonalToken();
+    if (!mounted) return false;
+    if (username == null) {
+      setState(() {
+        lichessCheckingAuth = false;
+        lichessAuthorized = false;
+        lichessToken = null;
+        lichessTokenExpired = service.lastStatusCode == 401;
+        lichessMessage = service.lastErrorMessage;
+      });
+      return false;
+    }
+    if (save) {
+      try {
+        await widget.lichessCredentialsStore.writeToken(token);
+      } catch (_) {
+        if (!mounted) return false;
+        setState(() {
+          lichessCheckingAuth = false;
+          lichessMessage =
+              'The token could not be stored securely. Please try again.';
+        });
+        return false;
+      }
+    }
+    if (!mounted) return false;
+    setState(() {
+      lichessCheckingAuth = false;
+      lichessAuthorized = true;
+      lichessTokenExpired = false;
+      lichessToken = token;
+      lichessName = username;
+      lichessFriendNeedsReauthorization = false;
+    });
+    await _checkLichessFriendAccess();
+    if (mounted) await _refreshOngoingGames();
+    return true;
+  }
+
+  Future<void> _disconnectLichess() async {
+    try {
+      await widget.lichessCredentialsStore.clear();
+    } catch (_) {
+      if (mounted) {
+        setState(() => lichessMessage =
+            'The saved token could not be removed. Please try again.');
+      }
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      lichessAuthorized = false;
+      lichessTokenExpired = false;
+      lichessToken = null;
+      lichessName = null;
+      lichessFriends = const [];
+      lichessIncomingChallenges = const [];
+      lichessFriendAccessGranted = false;
+      _ongoingGames = const [];
+      lichessMessage = 'Lichess disconnected from this device.';
+    });
+  }
+
+  Future<void> _refreshOngoingGames() async {
+    final token = lichessToken;
+    if (token == null || _checkingOngoingGames) return;
+    setState(() => _checkingOngoingGames = true);
+    final service = LichessBoardService(
+      token: token,
+      httpClient: widget.apiClient.httpClient,
+    );
+    final games = await service.getOngoingGames();
+    if (!mounted) return;
+    setState(() {
+      _checkingOngoingGames = false;
+      if (token != lichessToken) return;
+      if (games != null) {
+        _ongoingGames = games.where((game) => game.supportsBoardApi).toList();
+      } else {
+        lichessMessage = service.lastErrorMessage;
+      }
+    });
+  }
+
+  Widget _buildOngoingGamesPanel() {
+    return GlassPanel(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Expanded(child: Text('Games in progress')),
+              IconButton(
+                tooltip: 'Refresh games',
+                onPressed: _checkingOngoingGames ? null : _refreshOngoingGames,
+                icon: const Icon(Icons.refresh_rounded),
+              ),
+            ],
+          ),
+          if (_checkingOngoingGames) const LinearProgressIndicator(),
+          if (_ongoingGames.isEmpty && !_checkingOngoingGames)
+            const Text('No active Lichess games.'),
+          for (final game in _ongoingGames)
+            Material(
+              color: Colors.transparent,
+              child: ListTile(
+                title: Text(game.opponentName),
+                subtitle: Text('Resume ${game.speed} game'),
+                trailing: const Icon(Icons.play_arrow_rounded),
+                onTap: lichessSeeking || lichessFriendChallengePending
+                    ? null
+                    : () => _resumeLichessGame(game),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _resumeLichessGame(LichessOngoingGame game) async {
+    final token = lichessToken;
+    if (token == null || lichessSeeking) return;
+    setState(() => lichessSeeking = true);
+    final service = LichessBoardService(
+      token: token,
+      localLichessName: lichessName ?? '',
+      httpClient: widget.apiClient.httpClient,
+    );
+    final snapshot = await service.checkGame(game.gameId);
+    if (!mounted) return;
+    setState(() => lichessSeeking = false);
+    if (!snapshot.canContinue) {
+      setState(() => lichessMessage =
+          snapshot.errorMessage ?? 'This game has already finished.');
+      await _refreshOngoingGames();
+      return;
+    }
+    final initialMs = snapshot.clockInitialMs;
+    _launchLichessChallengeGame(
+      gameId: game.gameId,
+      timeMinutes:
+          initialMs == null || LichessBoardService.isUnlimitedClock(initialMs)
+              ? 0
+              : initialMs ~/ 60000,
+      incrementSeconds: (snapshot.clockIncrementMs ?? 0) ~/ 1000,
+      challengeRated: snapshot.rated ?? false,
     );
   }
 
@@ -1949,6 +2158,10 @@ class _OnlineSetupScreenState extends State<OnlineSetupScreen> {
   }
 
   Future<void> _reauthorizeLichessForFriends() async {
+    if (widget.directLichessSignIn) {
+      await _authorizeLichess();
+      return;
+    }
     if (lichessCheckingAuth) return;
     setState(() {
       lichessCheckingAuth = true;
@@ -2311,6 +2524,7 @@ class _OnlineSetupScreenState extends State<OnlineSetupScreen> {
   }
 
   Future<bool> _refreshLichessToken({bool waitForCallback = false}) async {
+    if (widget.directLichessSignIn) return _restoreDirectLichessToken();
     if (widget.apiClient.session == null) return false;
     setState(() {
       lichessCheckingAuth = true;
@@ -2431,6 +2645,13 @@ class _OnlineSetupScreenState extends State<OnlineSetupScreen> {
   }
 
   Future<void> _authorizeLichess() async {
+    if (widget.directLichessSignIn) {
+      if (lichessCheckingAuth) return;
+      final token = await showLichessTokenDialog(context);
+      if (!mounted || token == null) return;
+      await _connectDirectLichessToken(token, save: true);
+      return;
+    }
     if (widget.apiClient.session == null) {
       setState(() {
         lichessAuthorized = false;
@@ -2564,7 +2785,7 @@ class _OnlineSetupScreenState extends State<OnlineSetupScreen> {
         timeMinutes: requestedTime.minutes,
         incrementSeconds: requestedTime.increment,
         variant: 'standard',
-        color: 'random',
+        color: lichessFriendColor,
       ),
     );
     if (!mounted) return;
@@ -6909,7 +7130,7 @@ class _ChessComGuidePanel extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Use Chess.com inside WebView',
+                    Text('Play on Chess.com',
                         style: TextStyle(
                             fontWeight: FontWeight.w900, fontSize: 16)),
                     SizedBox(height: 2),
@@ -6929,23 +7150,15 @@ class _ChessComGuidePanel extends StatelessWidget {
           const SizedBox(height: 8),
           const _GuideStep(
             icon: Icons.sports_esports_rounded,
-            title: 'Start any game there',
-            subtitle:
-                'Choose blitz, rapid, rated, casual, or another mode in the WebView.',
+            title: 'Find a match or challenge a friend',
+            subtitle: 'Choose your time control and opponent on Chess.com.',
           ),
           const SizedBox(height: 8),
           const _GuideStep(
             icon: Icons.sensors_rounded,
-            title: 'Chessnut mirrors the board',
+            title: 'Play on your board',
             subtitle:
-                'The app reads the live FEN and sends supported board moves back into the page.',
-          ),
-          const SizedBox(height: 8),
-          const _GuideStep(
-            icon: Icons.tune_rounded,
-            title: 'Move control can be changed',
-            subtitle:
-                'Board Settings lets you choose Direct control or Web control for physical board moves.',
+                'Your moves are sent to Chess.com. Follow your opponent\'s moves on the screen and board.',
           ),
         ],
       ),
@@ -7343,7 +7556,7 @@ class _ConnectionSteps extends StatelessWidget {
           Expanded(
             child: _ConnectionStepInfo(
               number: '1',
-              label: 'WebView',
+              label: 'Sign in',
               done: true,
             ),
           ),
@@ -7351,7 +7564,7 @@ class _ConnectionSteps extends StatelessWidget {
           Expanded(
             child: _ConnectionStepInfo(
               number: '2',
-              label: 'Mirror',
+              label: 'Match',
               active: true,
             ),
           ),
@@ -7376,13 +7589,13 @@ class _ConnectionSteps extends StatelessWidget {
         Expanded(
           child: _ConnectionStepInfo(
             number: '2',
-            label: 'Seek',
+            label: 'Match',
             active: authorized,
           ),
         ),
         const SizedBox(width: 8),
         const Expanded(
-          child: _ConnectionStepInfo(number: '3', label: 'Stream'),
+          child: _ConnectionStepInfo(number: '3', label: 'Play'),
         ),
       ],
     );

@@ -74,6 +74,7 @@ class GameRoomScreen extends StatefulWidget {
     this.initialShareId,
     this.isChessnutClockDevice = false,
     this.hidePhysicalBoardConnectionUi = false,
+    this.onlineOnly = false,
     this.soundEffectsEnabled = true,
     this.soundEffects = const SoundEffectsSettings(),
     this.appSoundService = const SystemAppSoundService(),
@@ -113,6 +114,7 @@ class GameRoomScreen extends StatefulWidget {
   final String? initialShareId;
   final bool isChessnutClockDevice;
   final bool hidePhysicalBoardConnectionUi;
+  final bool onlineOnly;
   final bool soundEffectsEnabled;
   final SoundEffectsSettings soundEffects;
   final AppSoundService appSoundService;
@@ -241,6 +243,7 @@ class _GameRoomScreenState extends State<GameRoomScreen>
   bool _lichessDrawDialogInFlight = false;
   bool _lichessPositionInitialized = false;
   bool _lichessServerStateReceived = false;
+  final Set<String> _announcedLichessGameIds = {};
   String? _lichessInitialFen;
   bool _startGameBeepPlayed = false;
   bool _physicalBoardOrientationResolved = false;
@@ -873,7 +876,7 @@ class _GameRoomScreenState extends State<GameRoomScreen>
     _startLatencyProbeIfNeeded();
     _prepareBotEngineIfNeeded();
     _schedulePositionEvaluation();
-    if (resumed == null) {
+    if (resumed == null && !_isLichessGame) {
       _playSound(AppSoundEvent.gameStart);
     }
     if (!_isWidgetTest || widget.botEngine != null) {
@@ -1282,14 +1285,29 @@ class _GameRoomScreenState extends State<GameRoomScreen>
               width > height &&
               width < 1000 &&
               height < 600;
-          final compactLandscape =
-              spec.compactLandscape || androidPhoneLandscape;
+          final companionLandscape = _isLichessGame &&
+              !kIsWeb &&
+              defaultTargetPlatform == TargetPlatform.android &&
+              (width >= 1000 ||
+                  (widget.isChessnutClockDevice &&
+                      width >= 600 &&
+                      width / height > 2)) &&
+              width > height &&
+              height <= 650;
+          final compactLandscape = spec.compactLandscape ||
+              androidPhoneLandscape ||
+              companionLandscape;
           final boardHidingAvailable = _supportsBoardHiding;
-          final compactSpacing = androidPhoneLandscape ? 8.0 : spec.gutter;
+          final compactSpacing =
+              androidPhoneLandscape || companionLandscape ? 8.0 : spec.gutter;
           final compactHorizontalPadding =
-              androidPhoneLandscape ? 8.0 : spec.horizontalPadding;
+              androidPhoneLandscape || companionLandscape
+                  ? 8.0
+                  : spec.horizontalPadding;
           final compactVerticalPadding =
-              androidPhoneLandscape ? 8.0 : spec.topPadding;
+              androidPhoneLandscape || companionLandscape
+                  ? 8.0
+                  : spec.topPadding;
           final usesAndroidPortraitPhoneHeader = !kIsWeb &&
               defaultTargetPlatform == TargetPlatform.android &&
               !widget.isChessnutClockDevice &&
@@ -1617,6 +1635,7 @@ class _GameRoomScreenState extends State<GameRoomScreen>
                 alignment: Alignment.topCenter,
                 child: _CompactLandscapeLichessRoom(
                   spacing: compactSpacing,
+                  prominentClocks: companionLandscape,
                   title: _compactTitle(copy),
                   onBack: () => _showExitConfirm(context),
                   board: board,
@@ -1637,6 +1656,7 @@ class _GameRoomScreenState extends State<GameRoomScreen>
                     time: _formatClock(topClock.seconds),
                     active: topClock.active,
                     compactLandscape: true,
+                    prominent: companionLandscape,
                   ),
                   bottomClock: _PlayerClock(
                     key: const ValueKey('game-clock-bottom'),
@@ -1646,13 +1666,14 @@ class _GameRoomScreenState extends State<GameRoomScreen>
                     time: _formatClock(bottomClock.seconds),
                     active: bottomClock.active,
                     compactLandscape: true,
+                    prominent: companionLandscape,
                   ),
                   sanStrip: _buildLichessMovePanel(compactLandscape: true),
                   actions: _GameActions(
                     showHint: false,
                     enabled: !_gameConcluded,
                     onHint: _showHint,
-                    onFlip: _boardFlipAllowed ? _toggleBoardFlip : null,
+                    onFlip: _toggleBoardFlip,
                     onPrevious: _goPrevious,
                     onNext: _goNext,
                     onMore: () => _showMore(context),
@@ -1707,7 +1728,7 @@ class _GameRoomScreenState extends State<GameRoomScreen>
                         showHint: false,
                         enabled: !_gameConcluded,
                         onHint: _showHint,
-                        onFlip: _boardFlipAllowed ? _toggleBoardFlip : null,
+                        onFlip: _toggleBoardFlip,
                         onPrevious: _goPrevious,
                         onNext: _goNext,
                         onMore: () => _showMore(context),
@@ -2430,7 +2451,7 @@ class _GameRoomScreenState extends State<GameRoomScreen>
   }
 
   void _toggleBoardFlip() {
-    if (!_boardFlipAllowed) return;
+    if (!_isLichessGame && !_boardFlipAllowed) return;
     setState(() {
       _flipped = !_flipped;
     });
@@ -2442,6 +2463,9 @@ class _GameRoomScreenState extends State<GameRoomScreen>
   }
 
   void _applyBoardFlipPermission() {
+    // Display orientation follows the online player, independently of the
+    // connected physical board's coordinate mapping and flip permission.
+    if (_isLichessGame) return;
     if (!_boardFlipAllowed) {
       _flipped = false;
       return;
@@ -3465,31 +3489,37 @@ class _GameRoomScreenState extends State<GameRoomScreen>
           Navigator.of(dialogContext).pop();
           unawaited(_playAgain());
         },
-        onAnalyze: () async {
-          Navigator.of(dialogContext).pop();
-          if (!await _saveGameRecordIfNeeded(force: true, showFailure: true) ||
-              !mounted) {
-            return;
-          }
-          final pgn = _currentPgn();
-          final onAnalyzePgn = widget.onAnalyzePgn;
-          if (onAnalyzePgn != null) {
-            onAnalyzePgn(pgn);
-          } else {
-            widget.onNavigate('Analysis');
-          }
-        },
-        onBotSettings: () async {
-          Navigator.of(dialogContext).pop();
-          if (!await _saveGameRecordIfNeeded(force: true, showFailure: true) ||
-              !mounted) {
-            return;
-          }
-          if (widget.botConfig.careerMode != null || _isLichessGame) {
-            widget.onPostGameBotSettings?.call();
-          }
-          widget.onNavigate(_isOtbRecordGame ? 'Back' : 'Bot');
-        },
+        onAnalyze: widget.onlineOnly
+            ? null
+            : () async {
+                Navigator.of(dialogContext).pop();
+                if (!await _saveGameRecordIfNeeded(
+                        force: true, showFailure: true) ||
+                    !mounted) {
+                  return;
+                }
+                final pgn = _currentPgn();
+                final onAnalyzePgn = widget.onAnalyzePgn;
+                if (onAnalyzePgn != null) {
+                  onAnalyzePgn(pgn);
+                } else {
+                  widget.onNavigate('Analysis');
+                }
+              },
+        onBotSettings: widget.onlineOnly
+            ? null
+            : () async {
+                Navigator.of(dialogContext).pop();
+                if (!await _saveGameRecordIfNeeded(
+                        force: true, showFailure: true) ||
+                    !mounted) {
+                  return;
+                }
+                if (widget.botConfig.careerMode != null || _isLichessGame) {
+                  widget.onPostGameBotSettings?.call();
+                }
+                widget.onNavigate(_isOtbRecordGame ? 'Back' : 'Bot');
+              },
         settingsLabel:
             _isOtbRecordGame ? 'OTB game settings' : 'Bot game settings',
         androidPhoneDevice: androidPhoneDevice,
@@ -3886,7 +3916,13 @@ class _GameRoomScreenState extends State<GameRoomScreen>
                   label: 'Share live URL',
                   onTap: () {
                     Navigator.of(dialogContext).pop();
-                    if (_isBotGame || _isOtbRecordGame) {
+                    if (widget.onlineOnly && _isLichessGame) {
+                      unawaited(_copyText(
+                        Uri.https('lichess.org', widget.lichessConfig.gameId)
+                            .toString(),
+                        'Game URL copied',
+                      ));
+                    } else if (_isBotGame || _isOtbRecordGame) {
                       unawaited(_shareLiveUrl());
                     } else {
                       widget.onGameShared?.call(_currentSpectatorSnapshot());
@@ -4302,9 +4338,7 @@ class _GameRoomScreenState extends State<GameRoomScreen>
         if (event.blackRating != null) {
           _lichessBlackRating = event.blackRating;
         }
-        if (event.localSide != LichessPlayerSide.none) {
-          _lichessPlayerSide = event.localSide;
-        }
+        _resolveLichessPlayerSide(event.localSide);
         _sanMoves
           ..clear()
           ..addAll(history.sanMoves);
@@ -4345,6 +4379,7 @@ class _GameRoomScreenState extends State<GameRoomScreen>
         // Lichess 游戏只通过服务器事件判定结局，不使用本地状态判断
         _updateLichessGameOver(event);
       });
+      _announceLichessGameStarted(event);
       _refreshPhysicalLedStates();
       if (boardPositionChanged) {
         _syncMoveBoardAfterVirtualFenChange();
@@ -4499,10 +4534,28 @@ class _GameRoomScreenState extends State<GameRoomScreen>
       }
       if (event.whiteRating != null) _lichessWhiteRating = event.whiteRating;
       if (event.blackRating != null) _lichessBlackRating = event.blackRating;
-      if (event.localSide != LichessPlayerSide.none) {
-        _lichessPlayerSide = event.localSide;
-      }
+      _resolveLichessPlayerSide(event.localSide);
     });
+  }
+
+  void _resolveLichessPlayerSide(LichessPlayerSide side) {
+    if (side == LichessPlayerSide.none || side == _lichessPlayerSide) return;
+    _lichessPlayerSide = side;
+    _flipped = side == LichessPlayerSide.black;
+  }
+
+  void _announceLichessGameStarted(LichessBoardEvent event) {
+    final gameId = widget.lichessConfig.gameId;
+    if (gameId.isEmpty ||
+        !_lichessPositionInitialized ||
+        _gameOver ||
+        event.status?.trim().toLowerCase() != 'started' ||
+        !_announcedLichessGameIds.add(gameId)) {
+      return;
+    }
+    // The first authoritative running position confirms that an opponent is
+    // matched. Reconnects and duplicate full/state packets must remain quiet.
+    _playSound(AppSoundEvent.gameStart);
   }
 
   void _applyLichessStatusEvent(LichessBoardEvent event) {
@@ -4538,9 +4591,7 @@ class _GameRoomScreenState extends State<GameRoomScreen>
       if (event.blackRating != null) {
         _lichessBlackRating = event.blackRating;
       }
-      if (event.localSide != LichessPlayerSide.none) {
-        _lichessPlayerSide = event.localSide;
-      }
+      _resolveLichessPlayerSide(event.localSide);
       final whiteSeconds = _clockSecondsFromMillis(event.whiteTimeMs);
       final blackSeconds = _clockSecondsFromMillis(event.blackTimeMs);
       if (whiteSeconds != null) _whiteSeconds = whiteSeconds;
@@ -5016,7 +5067,6 @@ class _GameRoomScreenState extends State<GameRoomScreen>
     if (_isLichessGame || widget.mode == GameLaunchMode.otb) {
       if (_isLichessGame) {
         extraHeaders['LichessGameId'] = widget.lichessConfig.gameId;
-        extraHeaders['LichessToken'] = widget.lichessConfig.token;
         extraHeaders['LichessName'] = widget.lichessConfig.lichessName;
         extraHeaders['PlayerSide'] = _playerIsWhite ? 'White' : 'Black';
       }
@@ -5135,7 +5185,9 @@ class _GameRoomScreenState extends State<GameRoomScreen>
     final savedAt = DateTime.now();
     final metadata = PgnSaveMetadata(
       lichessGameId: _isLichessGame ? widget.lichessConfig.gameId : null,
-      lichessToken: _isLichessGame ? widget.lichessConfig.token : null,
+      lichessToken: _isLichessGame && !widget.onlineOnly
+          ? widget.lichessConfig.token
+          : null,
       lichessName: _isLichessGame ? widget.lichessConfig.lichessName : null,
       clientGameId: _recordGameId,
       playerColor: _isBotGame || _isLichessGame
@@ -5984,8 +6036,8 @@ class _GameOverResultDialog extends StatefulWidget {
   final String resultText;
   final CareerRatingDelta? careerRatingDelta;
   final VoidCallback onPlayAgain;
-  final VoidCallback onAnalyze;
-  final VoidCallback onBotSettings;
+  final VoidCallback? onAnalyze;
+  final VoidCallback? onBotSettings;
   final String settingsLabel;
   final VoidCallback onMainMenu;
   final bool androidPhoneDevice;
@@ -6225,8 +6277,8 @@ class _GameOverResultActions extends StatelessWidget {
   });
 
   final VoidCallback onPlayAgain;
-  final VoidCallback onAnalyze;
-  final VoidCallback onBotSettings;
+  final VoidCallback? onAnalyze;
+  final VoidCallback? onBotSettings;
   final String settingsLabel;
   final VoidCallback onMainMenu;
   final bool compactLandscape;
@@ -6280,7 +6332,12 @@ class _GameOverResultActions extends StatelessWidget {
             spacing: spacing,
             runSpacing: spacing,
             children: [
-              for (final button in [playAgain, analyze, mainMenu, botSettings])
+              for (final button in [
+                playAgain,
+                if (onAnalyze != null) analyze,
+                mainMenu,
+                if (onBotSettings != null) botSettings,
+              ])
                 SizedBox(width: buttonWidth, height: 58, child: button),
             ],
           );
@@ -6292,11 +6349,15 @@ class _GameOverResultActions extends StatelessWidget {
       children: [
         playAgain,
         const SizedBox(height: 8),
-        analyze,
-        const SizedBox(height: 8),
+        if (onAnalyze != null) ...[
+          analyze,
+          const SizedBox(height: 8),
+        ],
         mainMenu,
-        const SizedBox(height: 8),
-        botSettings,
+        if (onBotSettings != null) ...[
+          const SizedBox(height: 8),
+          botSettings,
+        ],
       ],
     );
   }
@@ -7648,6 +7709,7 @@ class _CompactLandscapeLichessRoom extends StatelessWidget {
     required this.bottomClock,
     required this.sanStrip,
     required this.actions,
+    this.prominentClocks = false,
   });
 
   final double spacing;
@@ -7659,6 +7721,7 @@ class _CompactLandscapeLichessRoom extends StatelessWidget {
   final Widget bottomClock;
   final Widget sanStrip;
   final Widget actions;
+  final bool prominentClocks;
 
   @override
   Widget build(BuildContext context) {
@@ -7671,8 +7734,9 @@ class _CompactLandscapeLichessRoom extends StatelessWidget {
             : fallbackHeight;
         final height = availableHeight.clamp(0.0, 480.0).toDouble();
         final headerHeight = _gameRoomTouchTarget(context);
-        final bodyHeight =
-            (height - headerHeight - spacing).clamp(180.0, 430.0).toDouble();
+        final bodyHeight = (height - headerHeight - spacing)
+            .clamp(prominentClocks ? 0.0 : 180.0, 430.0)
+            .toDouble();
         final width = constraints.maxWidth.isFinite
             ? constraints.maxWidth
             : MediaQuery.sizeOf(context).width;
@@ -7680,7 +7744,9 @@ class _CompactLandscapeLichessRoom extends StatelessWidget {
         final minBoardWidth = maxBoardWidth < 320.0 ? maxBoardWidth : 320.0;
         final boardWidth =
             (width * 0.40).clamp(minBoardWidth, maxBoardWidth).toDouble();
-        final playerWidth = (width * 0.22).clamp(180.0, 240.0).toDouble();
+        final playerWidth = prominentClocks
+            ? (width - boardWidth - spacing * 2) * 0.52
+            : (width * 0.22).clamp(180.0, 240.0).toDouble();
         return SizedBox(
           height: height,
           child: Column(
@@ -8056,28 +8122,33 @@ class _LichessGameInfoLine extends StatelessWidget {
       label: '$timeLabel, $ratingLabel',
       child: SizedBox(
         height: 24,
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            detail(
-              key: const ValueKey('lichess-game-time-control'),
-              icon: Icons.schedule_rounded,
-              label: timeLabel,
-            ),
-            const SizedBox(width: 10),
-            Container(
-              width: 1,
-              height: 13,
-              color: scheme.outlineVariant.withValues(alpha: 0.7),
-            ),
-            const SizedBox(width: 10),
-            detail(
-              key: const ValueKey('lichess-game-rating-mode'),
-              icon:
-                  rated ? Icons.leaderboard_rounded : Icons.handshake_outlined,
-              label: ratingLabel,
-            ),
-          ],
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              detail(
+                key: const ValueKey('lichess-game-time-control'),
+                icon: Icons.schedule_rounded,
+                label: timeLabel,
+              ),
+              const SizedBox(width: 10),
+              Container(
+                width: 1,
+                height: 13,
+                color: scheme.outlineVariant.withValues(alpha: 0.7),
+              ),
+              const SizedBox(width: 10),
+              detail(
+                key: const ValueKey('lichess-game-rating-mode'),
+                icon: rated
+                    ? Icons.leaderboard_rounded
+                    : Icons.handshake_outlined,
+                label: ratingLabel,
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -8467,6 +8538,7 @@ class _PlayerClock extends StatelessWidget {
     this.active = false,
     this.alignRight = false,
     this.compactLandscape = false,
+    this.prominent = false,
     super.key,
   });
 
@@ -8477,9 +8549,22 @@ class _PlayerClock extends StatelessWidget {
   final bool active;
   final bool alignRight;
   final bool compactLandscape;
+  final bool prominent;
 
   @override
   Widget build(BuildContext context) {
+    if (prominent) {
+      return LayoutBuilder(
+        builder: (context, constraints) => _buildContent(
+          context,
+          dense: constraints.maxHeight < 140,
+        ),
+      );
+    }
+    return _buildContent(context);
+  }
+
+  Widget _buildContent(BuildContext context, {bool dense = false}) {
     final primary = Theme.of(context).colorScheme.primary;
     final dark = Theme.of(context).brightness == Brightness.dark;
     final keyPrefix = key is ValueKey<String>
@@ -8488,7 +8573,7 @@ class _PlayerClock extends StatelessWidget {
     final clock = Container(
       key: compactLandscape ? ValueKey('$keyPrefix-time') : null,
       width: compactLandscape ? double.infinity : 96,
-      height: compactLandscape ? 76 : 47,
+      height: prominent ? null : (compactLandscape ? 76 : 47),
       alignment: Alignment.center,
       decoration: BoxDecoration(
         color: active
@@ -8510,7 +8595,8 @@ class _PlayerClock extends StatelessWidget {
             maxLines: 1,
             softWrap: false,
             style: TextStyle(
-              fontSize: compactLandscape ? 42 : 31,
+              fontSize:
+                  prominent ? (dense ? 48 : 76) : (compactLandscape ? 42 : 31),
               height: 1,
               fontWeight: FontWeight.w500,
               fontFeatures: const [],
@@ -8522,76 +8608,121 @@ class _PlayerClock extends StatelessWidget {
 
     if (compactLandscape) {
       return GlassPanel(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+        padding: EdgeInsets.symmetric(
+          horizontal: dense ? 6 : 10,
+          vertical: dense ? 6 : 9,
+        ),
         borderRadius: 10,
         tint: active ? primary.withValues(alpha: 0.10) : null,
         child: Column(
           crossAxisAlignment:
               alignRight ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                if (!alignRight) ...[
-                  _PresenceDot(active: active),
-                  const SizedBox(width: 9),
-                ],
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: alignRight
-                        ? CrossAxisAlignment.end
-                        : CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        name,
-                        key: ValueKey('$keyPrefix-name'),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 17,
-                          height: 1.05,
-                          fontWeight: FontWeight.w800,
-                        ),
+            if (dense)
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      name,
+                      key: ValueKey('$keyPrefix-name'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        height: 1.1,
+                        fontWeight: FontWeight.w800,
                       ),
-                      if (rating != null) ...[
-                        const SizedBox(height: 3),
+                    ),
+                  ),
+                  if (rating != null) ...[
+                    const SizedBox(width: 6),
+                    Text(
+                      rating!,
+                      key: ValueKey('$keyPrefix-rating'),
+                      maxLines: 1,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        height: 1.1,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ],
+              )
+            else
+              Row(
+                children: [
+                  if (!alignRight) ...[
+                    _PresenceDot(active: active),
+                    const SizedBox(width: 9),
+                  ],
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: alignRight
+                          ? CrossAxisAlignment.end
+                          : CrossAxisAlignment.start,
+                      children: [
                         Text(
-                          rating!,
-                          key: ValueKey('$keyPrefix-rating'),
+                          name,
+                          key: ValueKey('$keyPrefix-name'),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style:
-                              Theme.of(context).textTheme.labelSmall?.copyWith(
-                                    height: 1.1,
-                                    fontWeight: FontWeight.w700,
-                                  ),
+                          style: TextStyle(
+                            fontSize: prominent ? 22 : 17,
+                            height: 1.05,
+                            fontWeight: FontWeight.w800,
+                          ),
                         ),
+                        if (rating != null) ...[
+                          const SizedBox(height: 3),
+                          Text(
+                            rating!,
+                            key: ValueKey('$keyPrefix-rating'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelSmall
+                                ?.copyWith(
+                                  fontSize: prominent ? 26 : null,
+                                  height: 1.1,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                        ],
+                        if (source.isNotEmpty && !prominent) ...[
+                          const SizedBox(height: 3),
+                          Text(
+                            source,
+                            key: ValueKey('$keyPrefix-source'),
+                            maxLines: rating == null ? 2 : 1,
+                            overflow: rating == null
+                                ? TextOverflow.visible
+                                : TextOverflow.ellipsis,
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelSmall
+                                ?.copyWith(
+                                  height: 1.1,
+                                ),
+                          ),
+                        ],
                       ],
-                      if (source.isNotEmpty) ...[
-                        const SizedBox(height: 3),
-                        Text(
-                          source,
-                          key: ValueKey('$keyPrefix-source'),
-                          maxLines: rating == null ? 2 : 1,
-                          overflow: rating == null
-                              ? TextOverflow.visible
-                              : TextOverflow.ellipsis,
-                          style:
-                              Theme.of(context).textTheme.labelSmall?.copyWith(
-                                    height: 1.1,
-                                  ),
-                        ),
-                      ],
-                    ],
+                    ),
                   ),
-                ),
-                if (alignRight) ...[
-                  const SizedBox(width: 9),
-                  _PresenceDot(active: active),
+                  if (alignRight) ...[
+                    const SizedBox(width: 9),
+                    _PresenceDot(active: active),
+                  ],
                 ],
-              ],
-            ),
-            const Spacer(),
-            clock,
+              ),
+            if (prominent) ...[
+              SizedBox(height: dense ? 4 : 8),
+              Expanded(child: clock),
+            ] else ...[
+              const Spacer(),
+              clock,
+            ],
           ],
         ),
       );

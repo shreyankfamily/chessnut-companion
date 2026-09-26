@@ -1,7 +1,7 @@
 name: chessnut_flutter_export
-description: Chessnut Flutter frontend migration project.
+description: Online chess for Chessnut Companion, based on ChessnutNext.
 publish_to: "none"
-version: 1.0.3+10030
+version: 0.1.0+1
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
@@ -18,7 +18,8 @@ dependencies:
   flutter_localizations:
     sdk: flutter
   flutter_svg: ^2.3.0
-  flutter_secure_storage: ^11.0.0
+  # v11 requires SDK 37, which is not in Google's stable SDK repository.
+  flutter_secure_storage: 10.0.0
   ffi: ^2.2.0
   google_sign_in: ^7.2.0
   http: ^1.6.0
@@ -51,9 +52,6 @@ dependencies:
   sherpa_onnx: ^1.13.4
   vision:
     path: third_party/yolov5vision
-  firebase_core: ^4.11.0
-  firebase_crashlytics: ^5.2.4
-  firebase_analytics: ^12.4.3
   flutter_launcher_icons: ^0.14.4
   record: ^7.1.1
   sqlite3: ^3.6.0
@@ -105,9 +103,6 @@ flutter:
     - assets/OPEN_SOURCE_NOTICES.txt
     - assets/SUPERTONIC_3_MODEL_LICENSE.txt
     - assets/MMS_TTS_HEBREW_MODEL_LICENSE.txt
-    - assets/maia_weights/
-    - assets/lc0_weights/
     - assets/pieces/cburnett/
     - assets/sounds/
     - assets/sounds/voice/
-    - assets/tts/vits-piper-en_US-amy-low-int8.tar.bz2

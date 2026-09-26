@@ -2,10 +2,6 @@ import java.util.Properties
 
 plugins {
     id("com.android.application")
-    // START: FlutterFire Configuration
-    id("com.google.gms.google-services")
-    id("com.google.firebase.crashlytics")
-    // END: FlutterFire Configuration
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
@@ -13,8 +9,6 @@ plugins {
 
 val keystoreProperties = Properties()
 val keystorePropertiesFile = rootProject.file("key.properties")
-val stockfishNnueDirectory =
-    rootProject.file("../third_party/stockfish/android/nnue")
 if (keystorePropertiesFile.exists()) {
     keystorePropertiesFile.inputStream().use { keystoreProperties.load(it) }
 }
@@ -91,7 +85,7 @@ tasks.configureEach {
 
 android {
     namespace = "com.chessnut.chessnutnext"
-    compileSdk = 37
+    compileSdk = 36
     ndkVersion = "28.2.13676358"
 
     buildFeatures {
@@ -109,11 +103,11 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.chessnut.newchessnut"
+        applicationId = "io.github.shreyankfamily.companiononline"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = 28
-        targetSdk = flutter.targetSdkVersion
+        targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
@@ -132,12 +126,6 @@ android {
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("release")
-        }
-    }
-
-    sourceSets {
-        getByName("main") {
-            assets.srcDir(stockfishNnueDirectory)
         }
     }
 }

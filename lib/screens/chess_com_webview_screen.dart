@@ -10,7 +10,9 @@ import 'package:webview_windows/webview_windows.dart' as windows_webview;
 
 import '../models/app_models.dart';
 import '../services/board_settings_service.dart';
+import '../services/app_sound_service.dart';
 import '../services/chess_com_board_utils.dart';
+import '../services/chess_com_live_snapshot.dart';
 import '../services/chess_clock_switch_service.dart';
 import '../services/chessnut_api_client.dart';
 import '../services/game_notation_service.dart';
@@ -27,6 +29,7 @@ import '../services/voice_move_session_controller.dart';
 import '../widgets/app_chrome.dart';
 import '../widgets/app_feedback.dart';
 import '../widgets/chess_board.dart';
+import '../widgets/chess_com_companion_game_view.dart';
 import '../widgets/webview_zoom_guard.dart';
 import '../widgets/voice_moves_shortcut.dart';
 
@@ -110,6 +113,9 @@ class ChessComWebViewScreen extends StatefulWidget {
     this.recordSaveService,
     this.recordOwnerUserId,
     this.evo2LedRefreshRequestId = 0,
+    this.soundService = const AssetAppSoundService(),
+    this.soundEffectsEnabled = true,
+    this.gameStartTracker,
     super.key,
   });
 
@@ -130,6 +136,9 @@ class ChessComWebViewScreen extends StatefulWidget {
   final GameRecordSaveService? recordSaveService;
   final int? recordOwnerUserId;
   final int evo2LedRefreshRequestId;
+  final AppSoundService soundService;
+  final bool soundEffectsEnabled;
+  final ChessComGameStartTracker? gameStartTracker;
 
   @override
   State<ChessComWebViewScreen> createState() => _ChessComWebViewScreenState();
@@ -195,6 +204,10 @@ class _ChessComWebViewScreenState extends State<ChessComWebViewScreen> {
   bool _fenPollPending = false;
   bool? _reportedGameActive;
   bool _bridgeInjected = false;
+  ChessComLiveSnapshot? _liveSnapshot;
+  bool _showSiteControls = false;
+  bool _companionMoveInFlight = false;
+  int _companionBoardVersion = 0;
 
   ChessComWebViewAdapter? _webViewAdapter;
   late final ChessClockSwitchService _clockSwitchService;
@@ -243,9 +256,10 @@ class _ChessComWebViewScreenState extends State<ChessComWebViewScreen> {
       _isMoveBoard && !_chessComBoardAvailable;
 
   bool get _isChessComGameActive =>
+      _liveSnapshot != null ||
       _currentChessComPgn != null &&
-      !_isFinishedChessComResult(_currentChessComResult) &&
-      _currentChessComGameStep > 0;
+          !_isFinishedChessComResult(_currentChessComResult) &&
+          _currentChessComGameStep > 0;
 
   @override
   void initState() {
@@ -387,13 +401,14 @@ class _ChessComWebViewScreenState extends State<ChessComWebViewScreen> {
       await adapter.initialize(
         initialUrl: widget.initialUrl ??
             Uri.parse(
-              'https://www.chess.com/login_and_go?returnUrl=https://www.chess.com/',
+              'https://www.chess.com/login_and_go?returnUrl=https://www.chess.com/play/online',
             ),
         onPageStarted: () {
           if (!mounted) return;
           setState(() {
             _bridgeInjected = false;
             _bridgeStatus = 'Waiting for page';
+            _liveSnapshot = null;
           });
         },
         onPageFinished: () async {
@@ -567,6 +582,61 @@ class _ChessComWebViewScreenState extends State<ChessComWebViewScreen> {
     );
   }
 
+  Future<void> _pollLiveGame() async {
+    final snapshot = ChessComLiveSnapshot.fromJavaScript(
+      await _runJavaScript(chessComLiveSnapshotScript),
+    );
+    if (!mounted || _leavingChessCom) return;
+    final newGame =
+        snapshot != null && snapshot.gameId != _liveSnapshot?.gameId;
+    if (snapshot != null || _liveSnapshot != null) {
+      setState(() {
+        _liveSnapshot = snapshot;
+        if (snapshot != null) {
+          _localPlayerIsWhite = snapshot.localPlayerIsWhite;
+          if (newGame) _showSiteControls = false;
+        }
+      });
+      _reportGameActive(_isChessComGameActive);
+    }
+    if (snapshot != null &&
+        (widget.gameStartTracker ?? ChessComGameStartTracker.session)
+            .shouldAnnounce(snapshot) &&
+        widget.soundEffectsEnabled) {
+      unawaited(widget.soundService.play(AppSoundEvent.gameStart));
+    }
+  }
+
+  Future<void> _submitCompanionMove(ChessBoardMove move) async {
+    final snapshot = _liveSnapshot;
+    if (snapshot == null || _companionMoveInFlight) return;
+    final whiteToMove = ChessBoardState.fromFen(_latestFen).whiteToMove;
+    if (whiteToMove != snapshot.localPlayerIsWhite) return;
+    setState(() => _companionMoveInFlight = true);
+    try {
+      await _submitVoiceMoveUci(move.uci);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _companionMoveInFlight = false;
+          // Recreate the board on rejection, restoring the confirmed position.
+          _companionBoardVersion += 1;
+        });
+      }
+    }
+  }
+
+  Future<void> _openFriendChallenge() async {
+    if (_isChessComGameActive) return;
+    final opened = _javaScriptResultIsTrue(
+      await _runJavaScript(chessComOpenFriendPickerScript),
+    );
+    if (!opened && mounted) {
+      showAppFeedback(
+          context, 'Open New Game in Chess.com, then choose Play a Friend.');
+    }
+  }
+
   Future<void> _pollChessComFen() async {
     if (_leavingChessCom || !_bridgeInjected) return;
     if (_fenPollInFlight) {
@@ -575,6 +645,7 @@ class _ChessComWebViewScreenState extends State<ChessComWebViewScreen> {
     }
     _fenPollInFlight = true;
     try {
+      await _pollLiveGame();
       final value = await _runJavaScript('window.getCurrentFEN()');
       if (_leavingChessCom) return;
       final fen = _normalizeChessComFenResult(value);
@@ -1918,6 +1989,12 @@ class _ChessComWebViewScreenState extends State<ChessComWebViewScreen> {
   Widget build(BuildContext context) {
     final mediaPadding = MediaQuery.paddingOf(context);
     final usesMobileTopHeader = _usesMobileTopHeader;
+    final liveSnapshot = _liveSnapshot;
+    final size = MediaQuery.sizeOf(context);
+    final canShowCompanionGame = liveSnapshot != null &&
+        liveSnapshot.whiteClock != null &&
+        liveSnapshot.blackClock != null &&
+        size.width >= size.height * 1.6;
     final voiceMovesShortcut = _canUseVoiceMoves
         ? VoiceMovesShortcutButton(
             enabled: _voiceMoves.enabled,
@@ -1948,6 +2025,36 @@ class _ChessComWebViewScreenState extends State<ChessComWebViewScreen> {
                 child: _embeddedWebView(),
               ),
             ),
+            if (canShowCompanionGame && !_showSiteControls)
+              Positioned.fill(
+                left: usesMobileTopHeader
+                    ? mediaPadding.left
+                    : mediaPadding.left + _sideHeaderWidth,
+                top: usesMobileTopHeader
+                    ? mediaPadding.top + _topHeaderHeight
+                    : 0,
+                child: ChessComCompanionGameView(
+                  key: const ValueKey('chesscom-companion-game'),
+                  snapshot: liveSnapshot,
+                  fen: _latestFen,
+                  onMove: _submitCompanionMove,
+                  movesEnabled: !_companionMoveInFlight,
+                  boardVersion: _companionBoardVersion,
+                  onGameControls: () =>
+                      setState(() => _showSiteControls = true),
+                ),
+              ),
+            if (canShowCompanionGame && _showSiteControls)
+              Positioned(
+                top: usesMobileTopHeader ? _topHeaderHeight + 8 : 8,
+                right: 12,
+                child: FilledButton.icon(
+                  key: const ValueKey('chesscom-show-clocks'),
+                  onPressed: () => setState(() => _showSiteControls = false),
+                  icon: const Icon(Icons.timer_outlined),
+                  label: const Text('Board & clocks'),
+                ),
+              ),
             if (usesMobileTopHeader)
               Positioned(
                 key: const ValueKey('chesscom-game-header'),
@@ -1963,6 +2070,8 @@ class _ChessComWebViewScreenState extends State<ChessComWebViewScreen> {
                       : _connectPhysicalBoardFromSidebar,
                   onBack: () => _showExitConfirm(context),
                   onRefresh: _refreshChessComPage,
+                  onFriendChallenge:
+                      _isChessComGameActive ? null : _openFriendChallenge,
                   onResetMoveBoard: _moveBoardActionInFlight
                       ? null
                       : _resetConnectedMoveBoard,
@@ -1991,6 +2100,8 @@ class _ChessComWebViewScreenState extends State<ChessComWebViewScreen> {
                           : _connectPhysicalBoardFromSidebar,
                       onBack: () => _showExitConfirm(context),
                       onRefresh: _refreshChessComPage,
+                      onFriendChallenge:
+                          _isChessComGameActive ? null : _openFriendChallenge,
                       onResetMoveBoard: _moveBoardActionInFlight
                           ? null
                           : _resetConnectedMoveBoard,
@@ -2288,6 +2399,7 @@ class _ChessComTopHeader extends StatelessWidget {
     required this.onConnectBoard,
     required this.onBack,
     required this.onRefresh,
+    required this.onFriendChallenge,
     required this.onResetMoveBoard,
     required this.onFlipMoveBoard,
     this.placement = _ChessComHeaderPlacement.side,
@@ -2300,6 +2412,7 @@ class _ChessComTopHeader extends StatelessWidget {
   final VoidCallback? onConnectBoard;
   final VoidCallback onBack;
   final VoidCallback onRefresh;
+  final VoidCallback? onFriendChallenge;
   final VoidCallback? onResetMoveBoard;
   final VoidCallback? onFlipMoveBoard;
   final _ChessComHeaderPlacement placement;
@@ -2353,6 +2466,14 @@ class _ChessComTopHeader extends StatelessWidget {
       iconSize: iconSize,
       buttonExtent: buttonExtent,
     );
+    final friendsButton = _ChessComSidebarIcon(
+      key: const ValueKey('chesscom-challenge-friend'),
+      tooltip: 'Challenge a friend',
+      icon: Icons.person_add_alt_1_rounded,
+      onPressed: onFriendChallenge,
+      iconSize: iconSize,
+      buttonExtent: buttonExtent,
+    );
     final resetButton = _ChessComSidebarIcon(
       key: const ValueKey('chesscom-reset-move-board-button'),
       tooltip: 'Reset Move board',
@@ -2385,6 +2506,7 @@ class _ChessComTopHeader extends StatelessWidget {
                 children: [
                   backButton,
                   const Spacer(),
+                  friendsButton,
                   if (showMoveBoardActions) ...[
                     resetButton,
                     const SizedBox(width: 4),
@@ -2410,7 +2532,8 @@ class _ChessComTopHeader extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
         borderRadius: 0,
         tint: scheme.surface.withValues(alpha: 0.76),
-        child: Column(
+        child: SingleChildScrollView(
+            child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             if (!hideBoardConnectionUi) ...[
@@ -2418,6 +2541,8 @@ class _ChessComTopHeader extends StatelessWidget {
               const SizedBox(height: 18),
             ],
             refreshButton,
+            const SizedBox(height: 18),
+            friendsButton,
             if (showMoveBoardActions) ...[
               const SizedBox(height: 18),
               resetButton,
@@ -2434,7 +2559,7 @@ class _ChessComTopHeader extends StatelessWidget {
               ),
             ],
           ],
-        ),
+        )),
       ),
     );
   }

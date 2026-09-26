@@ -45,7 +45,7 @@ void main() {
       final info = find.byKey(const ValueKey('lichess-game-info'));
       expect(info, findsOneWidget);
       expect(
-        find.descendant(of: info, matching: find.text('10+5')),
+        find.descendant(of: info, matching: find.text('Loading')),
         findsOneWidget,
       );
       expect(

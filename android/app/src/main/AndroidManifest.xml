@@ -37,12 +37,13 @@
         android:name="android.hardware.usb.host"
         android:required="false" />
     <application
-        android:label="Chessnut Next"
+        android:label="Companion Online"
         android:name="${applicationName}"
-        android:icon="@mipmap/launcher_icon"
-        android:roundIcon="@mipmap/ic_launcher"
+        android:icon="@drawable/ic_companion_online"
+        android:roundIcon="@drawable/ic_companion_online"
         android:localeConfig="@xml/locales_config"
-        android:usesCleartextTraffic="true">
+        android:allowBackup="false"
+        android:usesCleartextTraffic="false">
         <activity
             android:name="com.chessnut.chessnutnext.MainActivity"
             android:exported="true"
@@ -90,64 +91,6 @@
                 <action android:name="com.chessnut.chessnutnext.evo2.Evo2BoardService" />
             </intent-filter>
         </service>
-
-        <service
-            android:name="com.chessnut.chessnutnext.ChessnutAccessibilityService"
-            android:exported="true"
-            android:label="@string/accessibility_service_label"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
-            <meta-data
-                android:name="android.accessibilityservice"
-                android:resource="@xml/accessibility_service_config" />
-            <intent-filter>
-                <action android:name="android.accessibilityservice.AccessibilityService" />
-            </intent-filter>
-        </service>
-
-        <activity
-            android:name="com.aboutyou.dart_packages.sign_in_with_apple.SignInWithAppleCallback"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-
-                <data android:scheme="signinwithapple" />
-                <data android:path="callback" />
-            </intent-filter>
-        </activity>
-
-        <receiver
-            android:name="com.chessnut.chessnutnext.ChessnutHomeWidgetProvider"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-                <action android:name="com.chessnut.chessnutnext.widget.TOGGLE_VISION" />
-            </intent-filter>
-            <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/widget_board_console_info" />
-        </receiver>
-        <receiver
-            android:name="com.chessnut.chessnut.ChessnutHomeWidgetReceiver"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-            </intent-filter>
-            <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/widget_legacy_home_info" />
-        </receiver>
-        <receiver
-            android:name="com.chessnut.chessnutnext.ChessnutQuickPlayWidgetProvider"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-            </intent-filter>
-            <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/widget_quick_play_info" />
-        </receiver>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
