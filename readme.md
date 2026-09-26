@@ -2,7 +2,7 @@
 
 An independent Android fork of [ChessnutNext](https://github.com/chessnutech/ChessnutNext), focused on playing online with a Chessnut board and the Chessnut Companion. Its landscape interface is designed for the Companion's 1280 × 480 display.
 
-The installed app is **Companion Online**, with Android application ID `io.github.shreyankfamily.companiononline`. It installs alongside the stock Chessnut app. This is a personal fork, not an official Chessnut release or a Google Play listing.
+The installed app is **Companion Online**, with Android application ID `io.github.shreyankfamily.companiononline`. It installs alongside the stock Chessnut app. This is a personal fork, not an official Chessnut release.
 
 ## What is included
 
@@ -14,19 +14,13 @@ The installed app is **Companion Online**, with Android application ID `io.githu
 
 The launcher exposes online play and board settings only. Puzzle, engine, analysis, training, store, and Chessnut-account routes are not part of this app. Legacy source remains in the repository for shared components and upstream maintenance; this is not a complete removal of every unused source file.
 
-## Install on the Companion
+## Install on the Companion through Google Play
 
-1. Download the signed ARM64 APK from this private repository's [Releases](https://github.com/shreyankfamily/chessnut-companion/releases), or build one using the instructions below.
-2. Transfer the APK to the Companion, open it in the device's file manager, and allow that installer to install apps when Android prompts. Install **Companion Online**.
-3. Close the stock Chessnut app before connecting your board. If it keeps the Bluetooth connection in the background, stop it from Android's app settings so Companion Online can connect.
-4. Open Companion Online, choose **Connect board**, and grant the requested Nearby devices/Bluetooth permission. Turn on your board and select it.
-5. Choose Lichess or Chess.com and connect your account as described below. Keep the Companion connected to the internet and set its media volume high enough to hear game-start sounds.
+This app is delivered through a Google Play **internal testing** release, not by downloading an APK from GitHub. Add the Google account used on the Companion to the release's tester list, open the Play testing link on the device, opt in, and select **Install**. Google Play then supplies the correct signed build and updates.
 
-For development, Android's USB debugging can also install a successfully built APK:
+An internal test can have up to 100 testers and is normally available within minutes. It is the appropriate track for installing this personal app on the Companion. Personal Play developer accounts created after November 13, 2023 need 12 opted-in testers for 14 continuous days before they can publish to the public Production track; that requirement does not prevent internal testing. See Google's [testing requirements](https://support.google.com/googleplay/android-developer/answer/14151465).
 
-```bash
-adb install -r build/app/outputs/flutter-apk/app-arm64-v8a-debug.apk
-```
+After installing, close the stock Chessnut app before connecting your board. If it keeps the Bluetooth connection in the background, stop it from Android's app settings so Companion Online can connect. Open Companion Online, choose **Connect board**, grant Nearby devices/Bluetooth permission, then choose Lichess or Chess.com. Keep the Companion connected to the internet and set its media volume high enough to hear game-start sounds.
 
 The current fork uses Bluetooth for board discovery. Physical board orientation is a separate setting from the screen: the screen follows your online color, while **Physical board auto orientation** controls how the app interprets the connected board.
 
@@ -69,7 +63,7 @@ The configured build toolchain is:
 | Android compile / target SDK | 36 |
 | Android minimum SDK | 28 |
 | Android NDK | 28.2.13676358 |
-| APK architecture | ARM64 (`android-arm64`) |
+| Google Play bundle architecture | ARM64 (`android-arm64`) |
 
 Install Flutter, JDK 17, and the Android SDK/NDK, then configure their normal local paths. `flutter doctor -v` helps identify missing Android tooling. Android SDK license acceptance must be completed by the developer. Android Studio is convenient for installing the SDK components; the commands below run from the repository root.
 
@@ -77,10 +71,10 @@ Install Flutter, JDK 17, and the Android SDK/NDK, then configure their normal lo
 GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/shreyankfamily/chessnut-companion.git
 cd chessnut-companion
 flutter pub get
-flutter build apk --debug --target-platform android-arm64 --split-per-abi
+flutter build appbundle --release --target-platform android-arm64
 ```
 
-The debug build writes `build/app/outputs/flutter-apk/app-arm64-v8a-debug.apk`. Debug signing uses the local Android debug key and does not require a release keystore. `--split-per-abi` keeps other architectures from being packaged with ARM64 native dependencies.
+The release build writes `build/app/outputs/bundle/release/app-release.aab`. Google Play accepts the Android App Bundle and generates the device-specific install for the Companion. It must be signed with the configured release/upload key; debug signing is not accepted by Google Play.
 
 `android/gradle.properties` sets `companionOnline=true`, disabling the native Stockfish, LC0, and camera/Vision builds for this online app. Their large Git LFS engine/model assets are therefore not needed for this configuration. Keep that property enabled for these instructions. The upstream native sources remain available, but changing the property alone does not restore the original multi-mode product.
 
@@ -104,10 +98,10 @@ cp android/key.properties.example android/key.properties
 Edit `android/key.properties` locally with `storeFile`, `storePassword`, `keyAlias`, and `keyPassword`. The example's `storeFile=release-keystore.jks` is relative to the `android` directory.
 
 ```bash
-flutter build apk --release --target-platform android-arm64 --split-per-abi
+flutter build appbundle --release --target-platform android-arm64
 ```
 
-The release build writes `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk`. Release builds require the configured keystore; they do not fall back to debug signing.
+The release build writes `build/app/outputs/bundle/release/app-release.aab`. Upload that signed bundle to Google Play Console's internal-testing track, add the Companion's Google account as a tester, and install through the Play testing link. Release builds require the configured keystore; they do not fall back to debug signing.
 
 Never commit `android/key.properties`, the `.jks`/`.keystore` file, passwords, tokens, or APK/build output. Back up the release key and its credentials securely: future updates must use the same application ID and signing key. Increase the build number in `pubspec.yaml` for later releases. Switching an existing debug installation to a release build uses a different signature and may require uninstalling the debug app, which removes its local settings and saved token.
 
